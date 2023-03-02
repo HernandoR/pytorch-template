@@ -4,6 +4,7 @@ from torchvision.utils import make_grid
 from base import BaseTrainer
 from utils import inf_loop, MetricTracker
 
+import wandb
 
 class Trainer(BaseTrainer):
     """
@@ -27,8 +28,12 @@ class Trainer(BaseTrainer):
         self.lr_scheduler = lr_scheduler
         self.log_step = int(np.sqrt(data_loader.batch_size))
 
-        self.train_metrics = MetricTracker('loss', *[m.__name__ for m in self.metric_ftns], writer=self.writer)
-        self.valid_metrics = MetricTracker('loss', *[m.__name__ for m in self.metric_ftns], writer=self.writer)
+        # self.train_metrics = MetricTracker('train/loss', *[m.__name__ for m in self.metric_ftns], writer=self.writer)
+        # self.valid_metrics = MetricTracker('valid/loss', *[m.__name__ for m in self.metric_ftns], writer=self.writer)
+        keys=['loss', *[m.__name__ for m in self.metric_ftns]]
+        self.train_metrics = MetricTracker(*['train/'+key for key in keys], writer=self.writer)
+        self.valid_metrics = MetricTracker(*['valid/'+key for key in keys], writer=self.writer)
+
 
     def _train_epoch(self, epoch):
         """
@@ -47,18 +52,27 @@ class Trainer(BaseTrainer):
             loss = self.criterion(output, target)
             loss.backward()
             self.optimizer.step()
+            Step=(epoch - 1) * self.len_epoch + batch_idx
 
-            self.writer.set_step((epoch - 1) * self.len_epoch + batch_idx)
-            self.train_metrics.update('loss', loss.item())
+            self.writer.set_step(Step)
+            
+
+
+            self.train_metrics.update('train/loss', loss.item())
             for met in self.metric_ftns:
-                self.train_metrics.update(met.__name__, met(output, target))
+                self.train_metrics.update('train/'+met.__name__, met(output, target))
 
             if batch_idx % self.log_step == 0:
                 self.logger.debug('Train Epoch: {} {} Loss: {:.6f}'.format(
                     epoch,
                     self._progress(batch_idx),
                     loss.item()))
+                
                 self.writer.add_image('input', make_grid(data.cpu(), nrow=8, normalize=True))
+                log=self.train_metrics.result()
+                self.wandb.log(log, step=Step)
+                
+
 
             if batch_idx == self.len_epoch:
                 break
@@ -66,10 +80,11 @@ class Trainer(BaseTrainer):
 
         if self.do_validation:
             val_log = self._valid_epoch(epoch)
-            log.update(**{'val_'+k : v for k, v in val_log.items()})
+            log.update(**{'valid/'+k : v for k, v in val_log.items()})
 
         if self.lr_scheduler is not None:
             self.lr_scheduler.step()
+
         return log
 
     def _valid_epoch(self, epoch):
@@ -88,15 +103,20 @@ class Trainer(BaseTrainer):
                 output = self.model(data)
                 loss = self.criterion(output, target)
 
-                self.writer.set_step((epoch - 1) * len(self.valid_data_loader) + batch_idx, 'valid')
-                self.valid_metrics.update('loss', loss.item())
+                Step=(epoch - 1) * len(self.valid_data_loader) + batch_idx
+                self.writer.set_step(Step, 'valid')
+                self.valid_metrics.update('valid/loss', loss.item())
                 for met in self.metric_ftns:
-                    self.valid_metrics.update(met.__name__, met(output, target))
+                    self.valid_metrics.update('valid/'+met.__name__, met(output, target))
+
                 self.writer.add_image('input', make_grid(data.cpu(), nrow=8, normalize=True))
+                log=self.valid_metrics.result()
+                wandb.log(log, step=Step)
 
         # add histogram of model parameters to the tensorboard
         for name, p in self.model.named_parameters():
             self.writer.add_histogram(name, p, bins='auto')
+            # wandb donot need this, wandb.watch() will do this
         return self.valid_metrics.result()
 
     def _progress(self, batch_idx):

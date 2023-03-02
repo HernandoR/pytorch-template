@@ -2,7 +2,7 @@ import torch
 from abc import abstractmethod
 from numpy import inf
 from logger import TensorboardWriter
-
+from logger import WandbWriter
 
 class BaseTrainer:
     """
@@ -40,6 +40,12 @@ class BaseTrainer:
         self.checkpoint_dir = config.save_dir
 
         # setup visualization writer instance                
+
+        self.wandb = WandbWriter(config.log_dir, self.logger, cfg_trainer['wandb'])
+        self.run= self.wandb.run if self.wandb.run else \
+                self.wandb.init(
+            dir='saved',name=config['run_id'],config=config)
+
         self.writer = TensorboardWriter(config.log_dir, self.logger, cfg_trainer['tensorboard'])
 
         if config.resume is not None:
@@ -58,10 +64,14 @@ class BaseTrainer:
         """
         Full training logic
         """
+        
+        # self.wandb.log({"model": self.model})
+        self.wandb.watch(self.model,log_freq=min(100, self.len_epoch))
+        
         not_improved_count = 0
         for epoch in range(self.start_epoch, self.epochs + 1):
             result = self._train_epoch(epoch)
-
+            
             # save logged informations into log dict
             log = {'epoch': epoch}
             log.update(result)
@@ -93,6 +103,8 @@ class BaseTrainer:
                 if not_improved_count > self.early_stop:
                     self.logger.info("Validation performance didn\'t improve for {} epochs. "
                                      "Training stops.".format(self.early_stop))
+                    
+                    self.wandb.finish()
                     break
 
             if epoch % self.save_period == 0:

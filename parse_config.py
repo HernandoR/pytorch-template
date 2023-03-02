@@ -31,6 +31,12 @@ class ConfigParser:
         self._save_dir = save_dir / 'models' / exper_name / run_id
         self._log_dir = save_dir / 'log' / exper_name / run_id
 
+        # add run_id to configs
+        self.config['run_id'] = run_id
+        # modification={'run_id': run_id}
+        # self._config = _update_config(config, modification)
+
+
         # make directory for saving checkpoints and log.
         exist_ok = run_id == ''
         self.save_dir.mkdir(parents=True, exist_ok=exist_ok)
@@ -77,7 +83,7 @@ class ConfigParser:
         modification = {opt.target : getattr(args, _get_opt_name(opt.flags)) for opt in options}
         return cls(config, resume, modification)
 
-    def init_obj(self, name, module, *args, **kwargs):
+    def init_obj(self, attr_name, module, *args, **kwargs):
         """
         Finds a function handle with the name given as 'type' in config, and returns the
         instance initialized with corresponding arguments given.
@@ -86,8 +92,8 @@ class ConfigParser:
         is equivalent to
         `object = module.name(a, b=1)`
         """
-        module_name = self[name]['type']
-        module_args = dict(self[name]['args'])
+        module_name = self[attr_name]['type']
+        module_args = dict(self[attr_name]['args'])
         assert all([k not in module_args for k in kwargs]), 'Overwriting kwargs given in config file is not allowed'
         module_args.update(kwargs)
         return getattr(module, module_name)(*args, **module_args)
